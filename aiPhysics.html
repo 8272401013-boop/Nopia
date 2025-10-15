@@ -1,0 +1,503 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>3D Hand Gesture Control with Physics</title>
+  <!-- MediaPipe Hands -->
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/control_utils/control_utils.js" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+  <!-- Babylon.js -->
+  <script src="https://cdn.babylonjs.com/babylon.js"></script>
+  <script src="https://cdn.babylonjs.com/loaders/babylonjs.loaders.min.js"></script>
+  <script src="https://cdn.babylonjs.com/havok/HavokPhysics_umd.js"></script>
+  <script src="https://cdn.babylonjs.com/ammo.js"></script>
+  <style>
+    body { margin: 0; padding: 0; font-family: Arial, sans-serif; overflow: hidden; }
+    #video-container {
+      position: absolute;
+      top: 20px;
+      right: 20px;
+      width: 320px;
+      height: 240px;
+      z-index: 10;
+      border: 2px solid white;
+      border-radius: 8px;
+      overflow: hidden;
+      transform: scaleX(-1);
+    }
+    #video, #canvas {
+      width: 100%;
+      height: 100%;
+    }
+    #renderCanvas {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      z-index: 1;
+      touch-action: none;
+    }
+    .container { 
+      position: relative;
+      width: 100vw;
+      height: 100vh;
+    }
+    .gesture-info { 
+      position: absolute; 
+      top: 10px; 
+      left: 10px; 
+      background: rgba(0,0,0,0.7); 
+      color: white; 
+      padding: 10px; 
+      border-radius: 5px;
+      z-index: 20;
+    }
+    .coordinates {
+      position: absolute;
+      top: 10px;
+      right: 350px;
+      background: rgba(0,0,0,0.7);
+      color: white;
+      padding: 10px;
+      border-radius: 5px;
+      z-index: 20;
+    }
+    .controls {
+      position: absolute;
+      bottom: 10px;
+      left: 10px;
+      background: rgba(0,0,0,0.7);
+      color: white;
+      padding: 10px;
+      border-radius: 5px;
+      z-index: 20;
+    }
+    .controls button {
+      margin: 5px;
+      padding: 5px 10px;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+    }
+    #clear-btn { background: #ff4444; color: white; }
+    #clear-btn:hover { background: #ff0000; }
+    #create-box { background: #44ff44; color: black; }
+    #create-sphere { background: #4444ff; color: white; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <!-- Babylon.js Canvas (fullscreen background) -->
+    <canvas id="renderCanvas"></canvas>
+    
+    <!-- MediaPipe Overlay (small preview in corner) -->
+    <div id="video-container">
+      <video id="video" autoplay playsinline></video>
+      <canvas id="canvas"></canvas>
+    </div>
+    
+    <!-- UI Elements -->
+    <div id="gesture-info" class="gesture-info"></div>
+    <div id="coordinates" class="coordinates">Coordinates will appear here</div>
+    <div class="controls">
+      <button id="clear-btn">Clear Scene</button>
+      <button id="create-box">Create Box</button>
+      <button id="create-sphere">Create Sphere</button>
+    </div>
+  </div>
+
+  <script>
+    // ========== MediaPipe Hand Tracking ==========
+    const video = document.getElementById('video');
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d');
+    const gestureInfo = document.getElementById('gesture-info');
+    const coordinatesDisplay = document.getElementById('coordinates');
+    const clearBtn = document.getElementById('clear-btn');
+    const createBoxBtn = document.getElementById('create-box');
+    const createSphereBtn = document.getElementById('create-sphere');
+
+    // Initialize MediaPipe Hands
+    const hands = new Hands({
+      locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
+    });
+
+    hands.setOptions({
+      maxNumHands: 2,
+      modelComplexity: 1,
+      minDetectionConfidence: 0.7,
+      minTrackingConfidence: 0.7
+    });
+
+    // ========== Babylon.js 3D Scene ==========
+    const renderCanvas = document.getElementById("renderCanvas");
+    const engine = new BABYLON.Engine(renderCanvas, true);
+    
+    const createScene = async function() {
+      const scene = new BABYLON.Scene(engine);
+      scene.clearColor = new BABYLON.Color4(0, 0, 0, 0);
+      
+      // Camera
+      const camera = new BABYLON.ArcRotateCamera("camera", -Math.PI / 2, Math.PI / 2, 10, BABYLON.Vector3.Zero(), scene);
+      camera.attachControl(renderCanvas, true);
+      camera.lowerRadiusLimit = 2;
+      camera.upperRadiusLimit = 20;
+      
+      // Light
+      const light = new BABYLON.HemisphericLight("light", new BABYLON.Vector3(0, 1, 0), scene);
+      light.intensity = 0.7;
+      
+
+      // Initialize physics
+		  await Ammo();
+
+      const gravityVector = new BABYLON.Vector3(0, -9.81, 0);
+      const physicsPlugin = new BABYLON.AmmoJSPlugin();
+			scene.enablePhysics(new BABYLON.Vector3(0, -9.81, 0), 
+				new 	BABYLON.AmmoJSPlugin());
+//      scene.enablePhysics(gravityVector, physicsPlugin);
+      
+			// Create a large ground box
+			const ground = BABYLON.MeshBuilder.CreateBox("ground", { width: 10, depth: 10, height: 1 }, scene);
+			ground.position.y = -0.5;
+
+			// Create a cylinder to represent the hole
+			const hole = BABYLON.MeshBuilder.CreateCylinder("hole", { diameter: 2, height: 2 }, scene);
+			hole.position.y = -0.5;
+
+			// Perform CSG subtraction to create the hole in the ground
+			const groundCSG = BABYLON.CSG.FromMesh(ground);
+			const holeCSG = BABYLON.CSG.FromMesh(hole);
+			const groundWithHoleCSG = groundCSG.subtract(holeCSG);
+			const groundWithHole = groundWithHoleCSG.toMesh("groundWithHole", null, scene);
+
+			// Dispose of the original meshes
+			ground.dispose();
+			hole.dispose();
+
+			// Apply material to the new ground
+			groundWithHole.material = new BABYLON.StandardMaterial("groundMat", scene);
+			groundWithHole.material.diffuseColor = new BABYLON.Color3(0.5, 0.5, 0.5);
+			groundWithHole.material.alpha = 0.2;
+
+			// Assign a physics impostor to the ground
+			groundWithHole.physicsImpostor = new BABYLON.PhysicsImpostor(groundWithHole, BABYLON.PhysicsImpostor.MeshImpostor, { mass: 0, restitution: 0.1, friction: 0.5 }, scene);
+            
+      return scene;
+    };
+
+    let scene;
+    let meshes = [];
+    let controlledObjects = [];  // Array to store all controllable objects
+    let lastHandPositions = [null, null];  // Track positions for two hands
+    let lastPinchTimes = [0, 0];
+    let selectedObjectIndex = 0;  // Currently selected object index
+
+    // Create box function
+    function createBox() {
+      const box = BABYLON.MeshBuilder.CreateBox("box", {size: 1}, scene);
+      box.position.y = 5; // Start above ground
+      box.position.z = 2; // Start above ground
+      
+      box.material = new BABYLON.StandardMaterial("boxMat", scene);
+      box.material.diffuseColor = BABYLON.Color3.Random();
+      
+      // Add physics
+      box.physicsImpostor = new BABYLON.PhysicsImpostor(
+        box, 
+        BABYLON.PhysicsImpostor.BoxImpostor, 
+        { mass: 1, restitution: 0.2, friction: 0.5 }, 
+        scene
+      );
+      
+      meshes.push(box);
+      controlledObjects.push(box);
+      updateCoordinates();
+    }
+
+    // Create sphere function
+    function createSphere() {
+      const sphere = BABYLON.MeshBuilder.CreateSphere("sphere", {diameter: 1}, scene);
+      sphere.position.y = 5; // Start above ground
+      sphere.position.x = 2; 
+      
+      sphere.material = new BABYLON.StandardMaterial("sphereMat", scene);
+      sphere.material.diffuseColor = BABYLON.Color3.Random();
+      
+      // Add physics
+      sphere.physicsImpostor = new BABYLON.PhysicsImpostor(
+        sphere, 
+        BABYLON.PhysicsImpostor.SphereImpostor, 
+        { mass: 1, restitution: 0.3, friction: 0.5 }, 
+        scene
+      );
+      
+      meshes.push(sphere);
+      controlledObjects.push(sphere);
+      updateCoordinates();
+    }
+
+    // Clear all meshes
+    function clearMeshes() {
+      meshes.forEach(mesh => mesh.dispose());
+      meshes = [];
+      controlledObjects = [];
+      updateCoordinates();
+    }
+
+    // Update coordinates display
+    function updateCoordinates() {
+      if (controlledObjects.length === 0) {
+        coordinatesDisplay.innerHTML = "No objects in scene";
+        return;
+      }
+      
+      let coordText = "<strong>Objects Coordinates:</strong><br>";
+      controlledObjects.forEach((obj, index) => {
+        const highlight = index === selectedObjectIndex ? "color: yellow;" : "";
+        coordText += `<span style="${highlight}">Object ${index + 1}: `;
+        coordText += `X: ${obj.position.x.toFixed(2)}, `;
+        coordText += `Y: ${obj.position.y.toFixed(2)}, `;
+        coordText += `Z: ${obj.position.z.toFixed(2)}</span><br>`;
+      });
+      coordinatesDisplay.innerHTML = coordText;
+    }
+
+    // Check if object is over a hole
+    function isOverHole(position) {
+      const holePositions = [
+        new BABYLON.Vector3(-3, 0, -3),
+        new BABYLON.Vector3(3, 0, -3),
+        new BABYLON.Vector3(-3, 0, 3),
+        new BABYLON.Vector3(3, 0, 3),
+        new BABYLON.Vector3(0, 0, 0)
+      ];
+      const holeRadius = 0.5;
+      
+      for (const holePos of holePositions) {
+        const distance = BABYLON.Vector3.Distance(
+          new BABYLON.Vector3(position.x, 0, position.z),
+          holePos
+        );
+        if (distance < holeRadius) {
+          return true;
+        }
+      }
+      return false;
+    }
+
+    // ========== Hand Gesture Functions ==========
+    function isPinching(landmarks) {
+      const thumbTip = landmarks[4];
+      const indexTip = landmarks[8];
+
+      const distance = Math.sqrt(
+        Math.pow(thumbTip.x - indexTip.x, 2) +
+        Math.pow(thumbTip.y - indexTip.y, 2) +
+        Math.pow(thumbTip.z - indexTip.z, 2)
+      );
+
+      return distance < 0.08;
+    }
+
+    function isFist(landmarks) {
+      const fingerTips = [8, 12, 16, 20];
+      const fingerMCPs = [5, 9, 13, 17];
+      
+      for (let i = 0; i < fingerTips.length; i++) {
+        const tip = landmarks[fingerTips[i]];
+        const mcp = landmarks[fingerMCPs[i]];
+        if (tip.y < mcp.y) return false;
+      }
+      return true;
+    }
+
+    function isOpenHand(landmarks) {
+      const fingerTips = [8, 12, 16, 20];
+      const fingerPIPs = [6, 10, 14, 18];
+      
+      for (let i = 0; i < fingerTips.length; i++) {
+        const tip = landmarks[fingerTips[i]];
+        const pip = landmarks[fingerPIPs[i]];
+        if (tip.y > pip.y) return false;
+      }
+      return true;
+    }
+
+    function isPointing(landmarks) {
+      // Check if index finger is extended and others are folded
+      const indexTip = landmarks[8];
+      const indexDip = landmarks[7];
+      const indexPip = landmarks[6];
+      
+      // Index finger should be extended
+      if (indexTip.y > indexDip.y || indexTip.y > indexPip.y) return false;
+      
+      // Other fingers should be folded
+      const otherTips = [12, 16, 20];
+      const otherMcps = [9, 13, 17];
+      
+      for (let i = 0; i < otherTips.length; i++) {
+        const tip = landmarks[otherTips[i]];
+        const mcp = landmarks[otherMcps[i]];
+        if (tip.y < mcp.y) return false;
+      }
+      
+      return true;
+    }
+
+    // Process hand tracking results
+    hands.onResults((results) => {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.save();
+      ctx.drawImage(results.image, 0, 0, canvas.width, canvas.height);
+      ctx.restore();
+
+      gestureInfo.innerHTML = '';
+      
+      if (results.multiHandLandmarks && controlledObjects.length > 0) {
+        results.multiHandLandmarks.forEach((landmarks, handIdx) => {
+          // Draw landmarks
+          drawConnectors(ctx, landmarks, HAND_CONNECTIONS, { color: '#00FF00', lineWidth: 2 });
+          drawLandmarks(ctx, landmarks, { color: '#FF0000', radius: 3 });
+
+          // Calculate hand center (normalized 0-1)
+          let sumX = 0, sumY = 0;
+          landmarks.forEach(lm => {
+            sumX += lm.x;
+            sumY += lm.y;
+          });
+          const handX = sumX / landmarks.length;
+          const handY = sumY / landmarks.length;
+
+          // Detect gestures
+          const gestures = [];
+          const pinching = isPinching(landmarks);
+          const fist = isFist(landmarks);
+          const openHand = isOpenHand(landmarks);
+          const pointing = isPointing(landmarks);
+          
+          if (pinching) gestures.push("PINCHING");
+          if (fist) gestures.push("FIST");
+          if (openHand) gestures.push("OPEN HAND");
+          if (pointing) gestures.push("POINTING");
+          
+          // Display gesture info
+          gestureInfo.innerHTML += `Hand ${handIdx + 1}: ${gestures.join(", ") || "No gesture"}<br>`;
+          
+          // Get video container position
+          const container = document.getElementById('video-container');
+          const rect = container.getBoundingClientRect();
+          
+          // Map hand position to 3D scene coordinates (-5 to 5)
+          const sceneX = (handX * rect.width / rect.width) * 10 - 5;
+          const sceneZ = (handY * rect.height / rect.height) * 10 - 5;
+          
+          // Select object with pointing gesture (only for first hand)
+          if (pointing && handIdx === 0) {
+            // Cycle through objects
+            selectedObjectIndex = (selectedObjectIndex + 1) % controlledObjects.length;
+            updateCoordinates();
+          }
+          
+          // Control the selected object
+          const controlledObj = controlledObjects[selectedObjectIndex];
+          
+          if (pinching && controlledObj) {
+            // Freeze physics while moving
+            controlledObj.physicsImpostor.setLinearVelocity(BABYLON.Vector3.Zero());
+            controlledObj.physicsImpostor.setAngularVelocity(BABYLON.Vector3.Zero());
+            
+            // Move object to hand position
+            controlledObj.position.x = -sceneX;
+            controlledObj.position.z = -sceneZ;
+            
+            // Reset Y position if not over a hole
+            if (!isOverHole(controlledObj.position)) {
+              controlledObj.position.y = 0.5;
+            }
+            
+            // Double pinch to change color
+            const now = Date.now();
+            if (now - lastPinchTimes[handIdx] < 500) {
+              controlledObj.material.diffuseColor = BABYLON.Color3.Random();
+            }
+            lastPinchTimes[handIdx] = now;
+          }
+          
+          if (fist && controlledObj) {
+            // Rotate based on horizontal movement
+            controlledObj.rotation.y += (handX - 0.5) * 0.1;
+          }
+          
+          if (openHand && lastHandPositions[handIdx] && controlledObj) {
+            // Move forward/backward (Z-axis) based on vertical movement
+            const deltaY = handY - lastHandPositions[handIdx].y;
+            controlledObj.position.z += deltaY * 2;
+            
+            // Check if over hole after movement
+            if (isOverHole(controlledObj.position)) {
+              // If over hole, let physics take over
+              controlledObj.physicsImpostor.setLinearVelocity(new BABYLON.Vector3(0, -5, 0));
+            }
+          }
+          
+          lastHandPositions[handIdx] = { x: handX, y: handY };
+        });
+        
+        updateCoordinates();
+      }
+    });
+
+    // ========== Start Everything ==========
+    async function startCamera() {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ 
+          video: { width: 320, height: 240, facingMode: 'user' } 
+        });
+        video.srcObject = stream;
+        
+        await new Promise((resolve) => {
+          video.onloadedmetadata = resolve;
+        });
+
+        const camera = new Camera(video, {
+          onFrame: async () => {
+            await hands.send({ image: video });
+          },
+          width: 320,
+          height: 240
+        });
+        camera.start();
+      } catch (err) {
+        console.error("Camera error:", err);
+      }
+    }
+
+    // UI Event Listeners
+    clearBtn.addEventListener('click', clearMeshes);
+    createBoxBtn.addEventListener('click', createBox);
+    createSphereBtn.addEventListener('click', createSphere);
+
+    // Initialize scene and run the render loop
+    (async () => {
+      scene = await createScene();
+      
+      // Run the render loop
+      engine.runRenderLoop(() => scene.render());
+      window.addEventListener('resize', () => engine.resize());
+
+      await hands.initialize();
+      startCamera();
+      
+      // Create initial objects
+      createSphere();
+      createBox();
+    })();
+  </script>
+</body>
+</html>
