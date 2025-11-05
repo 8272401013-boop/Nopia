@@ -1,0 +1,106 @@
+// =====================================================
+// 📊 3D BAR CHART VISUALIZATION WITH BABYLON.JS
+// =====================================================
+
+// Buat scene Babylon.js
+var canvas = document.getElementById("renderCanvas"); // gunakan <canvas id="renderCanvas"></canvas>
+var engine = new BABYLON.Engine(canvas, true);
+
+var createScene = function () {
+    var scene = new BABYLON.Scene(engine);
+    scene.clearColor = new BABYLON.Color3(0.95, 0.95, 0.97);
+
+    // --- Kamera dan Cahaya ---
+    var camera = new BABYLON.ArcRotateCamera("camera", -Math.PI / 2.5, Math.PI / 3, 25, new BABYLON.Vector3(0, 0, 0), scene);
+    camera.attachControl(canvas, true);
+    var light = new BABYLON.HemisphericLight("light", new BABYLON.Vector3(0, 10, 0), scene);
+    light.intensity = 1.0;
+
+    // --- Data Barchart ---
+    const categories = ["A", "B", "C", "D", "E"];
+    const values = [12, 24, 36, 18, 30];
+    const colors = [
+        new BABYLON.Color3(1, 0.3, 0.3),
+        new BABYLON.Color3(0.3, 1, 0.8),
+        new BABYLON.Color3(0.3, 0.5, 1),
+        new BABYLON.Color3(0.5, 1, 0.5),
+        new BABYLON.Color3(1, 1, 0.5)
+    ];
+
+    // --- Buat batang (bars) ---
+    const barWidth = 1.2;
+    const barDepth = 1.2;
+    const spacing = 2.0;
+
+    for (let i = 0; i < categories.length; i++) {
+        let barHeight = values[i] / 2;
+        let bar = BABYLON.MeshBuilder.CreateBox("bar" + i, { width: barWidth, depth: barDepth, height: values[i] }, scene);
+        bar.position.x = i * spacing - ((categories.length - 1) * spacing) / 2;
+        bar.position.y = barHeight / 2;
+        bar.material = new BABYLON.StandardMaterial("mat" + i, scene);
+        bar.material.diffuseColor = colors[i];
+        bar.material.specularColor = new BABYLON.Color3(0.2, 0.2, 0.2);
+
+        // Tambahkan label kategori
+        let dynamicTexture = new BABYLON.DynamicTexture("label" + i, { width: 256, height: 256 }, scene);
+        dynamicTexture.drawText(categories[i], 100, 150, "bold 80px Arial", "black", "transparent", true, true);
+        let plane = BABYLON.MeshBuilder.CreatePlane("labelPlane" + i, { width: 1.5, height: 1.0 }, scene);
+        plane.position = new BABYLON.Vector3(bar.position.x, -0.5, 0);
+        plane.material = new BABYLON.StandardMaterial("textMat" + i, scene);
+        plane.material.diffuseTexture = dynamicTexture;
+        plane.material.emissiveColor = BABYLON.Color3.White();
+
+        // Tambahkan hover effect
+        bar.actionManager = new BABYLON.ActionManager(scene);
+        bar.actionManager.registerAction(
+            new BABYLON.ExecuteCodeAction(BABYLON.ActionManager.OnPointerOverTrigger, function () {
+                bar.scaling.y = 1.2;
+                bar.material.emissiveColor = new BABYLON.Color3(0.8, 0.8, 0.8);
+                advancedTexture.getControlByName("infoText").text = 
+                    `Category: ${categories[i]} | Value: ${values[i]}`;
+            })
+        );
+        bar.actionManager.registerAction(
+            new BABYLON.ExecuteCodeAction(BABYLON.ActionManager.OnPointerOutTrigger, function () {
+                bar.scaling.y = 1.0;
+                bar.material.emissiveColor = BABYLON.Color3.Black();
+                advancedTexture.getControlByName("infoText").text = "Hover a bar to see details";
+            })
+        );
+    }
+
+    // --- Tambahkan tanah ---
+    var ground = BABYLON.MeshBuilder.CreateGround("ground", { width: 12, height: 6 }, scene);
+    ground.material = new BABYLON.StandardMaterial("groundMat", scene);
+    ground.material.diffuseColor = new BABYLON.Color3(0.95, 0.95, 0.95);
+
+    // --- GUI Info Box ---
+    var advancedTexture = BABYLON.GUI.AdvancedDynamicTexture.CreateFullscreenUI("UI");
+    var infoBox = new BABYLON.GUI.Rectangle();
+    infoBox.width = "400px";
+    infoBox.height = "60px";
+    infoBox.cornerRadius = 10;
+    infoBox.color = "#333";
+    infoBox.thickness = 2;
+    infoBox.background = "#ffffffcc";
+    infoBox.verticalAlignment = BABYLON.GUI.Control.VERTICAL_ALIGNMENT_BOTTOM;
+    advancedTexture.addControl(infoBox);
+
+    var infoText = new BABYLON.GUI.TextBlock("infoText", "Hover a bar to see details");
+    infoText.color = "black";
+    infoText.fontSize = 20;
+    infoBox.addControl(infoText);
+
+    return scene;
+};
+
+// Jalankan scene
+var scene = createScene();
+engine.runRenderLoop(function () {
+    scene.render();
+});
+
+// Resize otomatis jika layar berubah
+window.addEventListener("resize", function () {
+    engine.resize();
+});
